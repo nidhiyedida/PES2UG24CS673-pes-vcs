@@ -95,46 +95,72 @@ int object_exists(const ObjectID *id) {
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     char header[64];
-    int header_len = snprintf(header, sizeof(header), "%s %zu", type, size) + 1; // +1 for the null terminator
-    size_t total_size = header_len + size;
-    unsigned char *buffer = malloc(total_size);
-    memcpy(buffer, header, header_len);
-    memcpy(buffer + header_len, data, size);
+    const char *type_str;
 
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(buffer, total_size, hash);
+    if (type == OBJ_BLOB) type_str = "blob";
+    else if (type == OBJ_TREE) type_str = "tree";
+    else if (type == OBJ_COMMIT) type_str = "commit";
+    else return -1;
 
-    char hash_str[65];
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++){
-        sprintf(hash_str + i * 2, "%02x", hash[i]);
+    snprintf(header, sizeof(header), "%s %zu", type_str, len);
+    size_t header_len = strlen(header) + 1; // +1 for '\0'
+    
+    size_t total_size = header_len + len;
+
+    unsigned char *full_data = malloc(total_size);
+    if (!full_data) return -1;
+
+    memcpy(full_data, header, header_len);
+    memcpy(full_data + header_len, data, len);
+
+    ObjectID id;
+    compute_hash(full_data, total_size, &id);
+
+    if (object_exists(&id)) {
+        *id_out = id;
+        free(full_data);
+        return 0;
     }
-    hash_str[64] = '\0';
 
-    char dir[256], path[256];
-    sprintf(dir, sizeof(dir), "./pes/objects/%.2s", hash_str);
-    sprintf(path, sizeof(path), "%s/%s", dir, hash_str + 2);
+    char path[512];
+    object_path(&id, path, sizeof(path));
 
-    mkdir(".pes", 0755);
-    mkdir("./pes/objects", 0755);
-    mkdir(dir, 0755);
+    char dir[512];
+    strcpy(dir, path);
 
-    char temp_path[300];
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';   // remove filename → keep directory
+        mkdir(dir, 0755);  // create directory (ignore if exists)
+    }
+
+    char temp_path[600];
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
-    FILE *fp = fopen(temp_path, "wb");
-    if (!fp) return -1;
+    int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        free(full_data);
+        return -1;
+    }
 
-    fwrite(buffer, 1, total_size, fp);
-    fclose(fp);
+    ssize_t written = write(fd, full_data, total_size);
+    if (written != (ssize_t)total_size) {
+        close(fd);
+        free(full_data);
+        return -1;
+    }
 
-    rename(temp_path, path);
+    fsync(fd);
+    close(fd);
 
-    strcpy(out_hash, hash_str);
-    free(buffer);
+    if (rename(temp_path, path) != 0) {
+        free(full_data);
+        return -1;
+    }
+
+    *id_out = id;
+    free(full_data);
     return 0;
-
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
 }
 
 // Read an object from the store.
@@ -159,45 +185,78 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 //
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
-int object_read(const char *hash_str, char *type, void **data, size_t *size) {
-    char path[256];
-    snprintf(path, sizeof(path), ".pes/objects/%.2s/%s", hash_str, hash_str + 2);
+int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
+    char path[512];
+    object_path(id, path, sizeof(path));
 
-    FILE *fp = fopen(path, "rb");
-    if (!fp) return -1;
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
 
-    fseek(fp, 0, SEEK_END);
-    size_t file_size = ftell(fp);
-    rewind(fp);
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    rewind(f);
 
     unsigned char *buffer = malloc(file_size);
-    fread(buffer, 1, file_size, fp);
-    fclose(fp);
-
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(buffer, file_size, hash);
-
-    char computed[65];
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        sprintf(computed + i * 2, "%02x", hash[i]);
+    if (!buffer) {
+        fclose(f);
+        return -1;
     }
-    computed[64] = '\0';
 
-    if (strcmp(computed, hash_str) != 0) {
+    if (fread(buffer, 1, file_size, f) != (size_t)file_size) {
+        free(buffer);
+        fclose(f);
+        return -1;
+    }
+
+    fclose(f);
+
+    char *null_pos = memchr(buffer, '\0', file_size);
+    if (!null_pos) {
         free(buffer);
         return -1;
     }
 
-    char *header_end = memchr(buffer, '\0', file_size);
-    if (!header_end) {
+    size_t header_len = null_pos - (char *)buffer;
+    char header[64];
+
+    memcpy(header, buffer, header_len);
+    header[header_len] = '\0';
+
+    char type_str[10];
+    size_t size;
+
+    if (sscanf(header, "%s %zu", type_str, &size) != 2) {
+        free(buffer);
+        return -1;
+    }
+    
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
+    else {
         free(buffer);
         return -1;
     }
 
-    sscanf((char *)buffer, "%s %zu", type, size);
+    unsigned char *data_start = (unsigned char *)null_pos + 1;
 
-    *data = malloc(*size);
-    memcpy(*data, header_end + 1, *size);
+    *data_out = malloc(size);
+    if (!*data_out) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(*data_out, data_start, size);
+    *len_out = size;
+
+    ObjectID computed;
+    compute_hash(buffer, file_size, &computed);
+
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(buffer);
+        free(*data_out);
+        return -1;
+    }
 
     free(buffer);
     return 0;
