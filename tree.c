@@ -8,8 +8,8 @@
 //
 // Example single entry (conceptual):
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
-
 #include "tree.h"
+#include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -191,7 +191,7 @@ int tree_from_index(ObjectID *id_out) {
                 strcpy(e->name, subname);
             }
         }
-    
+
         void *subdata;
         size_t sublen;
         ObjectID sub_id;
