@@ -143,5 +143,52 @@ int tree_from_index(ObjectID *id_out) {
         const char *path = index.entries[i].path;
 
         const char *slash = strchr(path, '/');
+
+        if (!slash) {
+            TreeEntry *e = &root.entries[root.count++];
+
+            e->mode = index.entries[i].mode;
+            e->hash = index.entries[i].hash;
+            strcpy(e->name, path);
+        } else {
+            char dirname[256];
+            strncpy(dirname, path, slash - path);
+            dirname[slash - path] = '\0';
+
+            // check if already added
+            int exists = 0;
+            for (int j = 0; j < dir_count; j++) {
+                if (strcmp(dirs[j], dirname) == 0) {
+                    exists = 1;
+                    break;
+                }
+            }
+
+            if (!exists) {
+                strcpy(dirs[dir_count++], dirname);
+            }
+        }
     }
-}
+
+    for (int i = 0; i < dir_count; i++) {
+        Tree subtree;
+        subtree.count = 0;
+
+        for (int j = 0; j < index.count; j++) {
+            const char *path = index.entries[j].path;
+
+            if (strncmp(path, dirs[i], strlen(dirs[i])) == 0 &&
+                path[strlen(dirs[i])] == '/') {
+
+                const char *subname = path + strlen(dirs[i]) + 1;
+
+                if (strchr(subname, '/')) continue;
+
+                TreeEntry *e = &subtree.entries[subtree.count++];
+
+                e->mode = index.entries[j].mode;
+                e->hash = index.entries[j].hash;
+                strcpy(e->name, subname);
+            }
+        }
+    }
