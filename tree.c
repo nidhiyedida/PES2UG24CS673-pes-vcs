@@ -191,4 +191,21 @@ int tree_from_index(ObjectID *id_out) {
                 strcpy(e->name, subname);
             }
         }
+    
+        void *subdata;
+        size_t sublen;
+        ObjectID sub_id;
+
+        if (tree_serialize(&subtree, &subdata, &sublen) != 0) return -1;
+
+        if (object_write(OBJ_TREE, subdata, sublen, &sub_id) != 0) {
+            free(subdata);
+            return -1;
+        }
+
+        free(subdata);
+        TreeEntry *e = &root.entries[root.count++];
+        e->mode = MODE_DIR;
+        e->hash = sub_id;
+        strcpy(e->name, dirs[i]);
     }
