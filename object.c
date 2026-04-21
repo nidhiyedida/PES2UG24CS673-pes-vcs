@@ -96,6 +96,10 @@ int object_exists(const ObjectID *id) {
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type, size) + 1; // +1 for the null terminator
+    size_t total_size = header_len + size;
+    unsigned char *buffer = malloc(total_size);
+    memcpy(buffer, header, header_len);
+    memcpy(buffer + header_len, data, size);
     (void)type; (void)data; (void)len; (void)id_out;
     return -1;
 }
