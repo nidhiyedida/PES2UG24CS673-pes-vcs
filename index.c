@@ -252,3 +252,12 @@ int index_add(Index *index, const char *path) {
         if (index->count >= MAX_INDEX_ENTRIES) return -1;
         e = &index->entries[index->count++];
     }
+
+    e->mode = st.st_mode;
+    e->hash = id;
+    e->mtime_sec = st.st_mtime;
+    e->size = st.st_size;
+    strcpy(e->path, path);
+
+    return index_save(index);
+}
