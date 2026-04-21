@@ -109,6 +109,14 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
         sprintf(hash_str + i * 2, "%02x", hash[i]);
     }
     hash_str[64] = '\0';
+
+    char dir[256], path[256];
+    sprintf(dir, sizeof(dir), "./pes/objects/%.2s", hash_str);
+    sprintf(path, sizeof(path), "%s/%s", dir, hash_str + 2);
+
+    mkdir(".pes", 0755);
+    mkdir("./pes/objects", 0755);
+    mkdir(dir, 0755);
     (void)type; (void)data; (void)len; (void)id_out;
     return -1;
 }
