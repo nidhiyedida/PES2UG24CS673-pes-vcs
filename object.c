@@ -100,6 +100,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     unsigned char *buffer = malloc(total_size);
     memcpy(buffer, header, header_len);
     memcpy(buffer + header_len, data, size);
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(buffer, total_size, hash);
+
+    char hash_str[65];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++){
+        sprintf(hash_str + i * 2, "%02x", hash[i]);
+    }
+    hash_str[64] = '\0';
     (void)type; (void)data; (void)len; (void)id_out;
     return -1;
 }
