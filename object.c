@@ -132,7 +132,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     strcpy(out_hash, hash_str);
     free(buffer);
     return 0;
-    
+
     (void)type; (void)data; (void)len; (void)id_out;
     return -1;
 }
@@ -159,8 +159,46 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 //
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
-int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+int object_read(const char *hash_str, char *type, void **data, size_t *size) {
+    char path[256];
+    snprintf(path, sizeof(path), ".pes/objects/%.2s/%s", hash_str, hash_str + 2);
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return -1;
+
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    rewind(fp);
+
+    unsigned char *buffer = malloc(file_size);
+    fread(buffer, 1, file_size, fp);
+    fclose(fp);
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(buffer, file_size, hash);
+
+    char computed[65];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(computed + i * 2, "%02x", hash[i]);
+    }
+    computed[64] = '\0';
+
+    if (strcmp(computed, hash_str) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    char *header_end = memchr(buffer, '\0', file_size);
+    if (!header_end) {
+        free(buffer);
+        return -1;
+    }
+
+    sscanf((char *)buffer, "%s %zu", type, size);
+
+    *data = malloc(*size);
+    memcpy(*data, header_end + 1, *size);
+
+    free(buffer);
+    return 0;
 }
